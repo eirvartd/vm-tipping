@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VM-tipping 2026 – Kontoret</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #faf6ec; }
+  #root { min-height: 100vh; }
+  #fb-warning { font-family: 'Cormorant Garamond', Georgia, serif; max-width: 640px; margin: 40px auto; padding: 20px 24px; background: #fff; border: 1px solid #d8cdaf; border-radius: 6px; color: #1a2238; }
+  #fb-warning code { background: #f0ece0; padding: 1px 5px; border-radius: 3px; }
+</style>
+
+<!-- React + Babel (CDN) -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ============================================================
+     FIREBASE-OPPSETT
+     Lim inn dine egne nøkler fra Firebase-konsollen nedenfor.
+     (Se guiden: SETUP-firebase.md)
+     ============================================================ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getFirestore, collection, doc, setDoc, onSnapshot
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  // 🔑 LIM INN DIN EGEN FIREBASE-KONFIG HER:
+const firebaseConfig = {
+  apiKey: "AIzaSyDUsU8cMm8LA2mTTTvlGdoJoEeq8aoxfVI",
+  authDomain: "vm-tipping-kontor.firebaseapp.com",
+  projectId: "vm-tipping-kontor",
+  storageBucket: "vm-tipping-kontor.firebasestorage.app",
+  messagingSenderId: "186411096564",
+  appId: "1:186411096564:web:58c5568c077750a85ec1a1"
+};
+
+  // Bare koble til hvis konfig faktisk er fylt inn
+  if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "DIN_API_KEY") {
+    const fbApp = initializeApp(firebaseConfig);
+    const db = getFirestore(fbApp);
+    window.__db = { db, fns: { collection, doc, setDoc, onSnapshot } };
+  } else {
+    window.__db = null;
+  }
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+
+// ============================================================
+//  VM 2026 – Kontortipping
+//  Delt lagring via Firebase Firestore (sanntid) slik at alle
+//  kollegaer ser hverandres tips og felles poengtavle.
+// ============================================================
+
+const GROUPS = {
+  A: ["Mexico", "Sør-Afrika", "Sør-Korea", "Tsjekkia"],
+  B: ["Canada", "Sveits", "Qatar", "Bosnia-Hercegovina"],
+  C: ["Brasil", "Marokko", "Haiti", "Skottland"],
+  D: ["USA", "Paraguay", "Australia", "Tyrkia"],
+  E: ["Tyskland", "Curaçao", "Elfenbenskysten", "Ecuador"],
+  F: ["Nederland", "Japan", "Tunisia", "Sverige"],
+  G: ["Belgia", "Egypt", "Iran", "New Zealand"],
+  H: ["Spania", "Kapp Verde", "Saudi-Arabia", "Uruguay"],
+  I: ["Frankrike", "Senegal", "Norge", "Irak"],
+  J: ["Argentina", "Algerie", "Østerrike", "Jordan"],
+  K: ["Portugal", "Usbekistan", "Colombia", "DR Kongo"],
+  L: ["England", "Kroatia", "Ghana", "Panama"],
+};
+
+const FAVORITES = [
+  "Spania", "Frankrike", "England", "Brasil", "Argentina",
+  "Portugal", "Nederland", "Tyskland", "Belgia", "Kroatia",
+  "Marokko", "Uruguay", "Colombia", "Senegal", "Sveits",
+  "Japan", "Mexico", "USA", "Norge", "Sverige", "Annen",
+];
+
+const PLAYERS = [
+  "Erling Braut Haaland", "Kylian Mbappé", "Lamine Yamal", "Vinícius Jr.",
+  "Harry Kane", "Julián Álvarez", "Lautaro Martínez", "Cristiano Ronaldo",
+  "Bukayo Saka", "Florian Wirtz", "Rodrygo", "Alexander Sørloth",
+  "Antoine Griezmann", "Ousmane Dembélé", "Phil Foden", "Annen",
+];
+
+// Poengregler
+const POINTS = {
+  groupWinner: 3,
+  groupRunnerUp: 2,
+  bracketTeam: 1, // per riktig lag som når en sluttspillrunde
+  gold: 10,
+  silver: 6,
+  bronze: 4,
+  topScorer: 8,
+  topAssist: 8,
+  bestKeeper: 6,
+  norwayFinish: 5,
+};
+
+const SECTIONS = [
+  { key: "groups", label: "Gruppevinnere" },
+  { key: "bracket", label: "Sluttspill (bracket)" },
+  { key: "medals", label: "Medaljer" },
+  { key: "individual", label: "Individuelt" },
+  { key: "norway", label: "Norge" },
+];
+
+// --- Sluttspill: Round of 32 (16-delsfinaler) ---
+// Hvert slott er enten gruppevinner (f.eks. "1A"), gruppetoer ("2B"),
+// eller en av de beste treerne ("3*") som deltakeren plasserer selv.
+// Oppsettet følger FIFAs offisielle bracket for VM 2026.
+const R32_MATCHES = [
+  { id: "m73", a: "1A", b: "3*" },
+  { id: "m74", a: "1C", b: "3*" },
+  { id: "m75", a: "1E", b: "3*" },
+  { id: "m76", a: "1G", b: "3*" },
+  { id: "m77", a: "1I", b: "3*" },
+  { id: "m78", a: "1K", b: "3*" },
+  { id: "m79", a: "2A", b: "2B" },
+  { id: "m80", a: "1B", b: "3*" },
+  { id: "m81", a: "1D", b: "3*" },
+  { id: "m82", a: "1F", b: "3*" },
+  { id: "m83", a: "1H", b: "3*" },
+  { id: "m84", a: "1J", b: "3*" },
+  { id: "m85", a: "1L", b: "3*" },
+  { id: "m86", a: "2C", b: "2D" },
+  { id: "m87", a: "2E", b: "2F" },
+  { id: "m88", a: "2I", b: "2L" },
+];
+// 16-delsfinale (Round of 16) – vinnerne fra R32 møtes parvis
+const R16_PAIRS = [
+  ["m73", "m74"], ["m75", "m76"], ["m77", "m78"], ["m79", "m80"],
+  ["m81", "m82"], ["m83", "m84"], ["m85", "m86"], ["m87", "m88"],
+];
+const ROUND_LABELS = {
+  r32: "16-delsfinale (Round of 32)",
+  r16: "8-delsfinale (Round of 16)",
+  qf: "Kvartfinale",
+  sf: "Semifinale",
+  final: "Finale",
+};
+
+const NORWAY_OPTIONS = [
+  "Ut i gruppespillet", "16-delsfinale", "8-delsfinale",
+  "Kvartfinale", "Semifinale", "Finale", "Gull",
+];
+
+// Frist for innlevering: åpningskampen 11. juni 2026 kl. 21:00 norsk tid (CEST = UTC+2)
+const DEADLINE = new Date("2026-06-11T21:00:00+02:00");
+function isLocked() { return Date.now() >= DEADLINE.getTime(); }
+function deadlineText() {
+  return DEADLINE.toLocaleString("no-NO", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+}
+
+function emptyEntry() {
+  return {
+    name: "",
+    groups: {},        // { A: "Mexico", ... } gruppevinnere
+    runnerUps: {},     // { A: "Sør-Korea", ... } gruppetoere
+    thirds: ["", "", "", "", "", "", "", ""], // 8 beste treere
+    bracket: {},       // { m73: "lagnavn", r16_0: "...", qf_0, sf_0, final_0 }
+    gold: "", silver: "", bronze: "",
+    topScorer: "", topAssist: "", bestKeeper: "",
+    norwayFinish: "",
+    finalGoals: "",
+    submittedAt: null,
+  };
+}
+
+const c = {
+  ink: "#1a2238",
+  gold: "#c8a23c",
+  goldSoft: "#e8d9a8",
+  cream: "#faf6ec",
+  green: "#2f7d52",
+  line: "#d8cdaf",
+  red: "#a3392f",
+};
+
+// Slå opp lagnavn for et slott som "1A", "2B" eller "3*" (treer #i)
+function slotTeam(slot, e, thirdIndex) {
+  if (slot === "3*") return e.thirds?.[thirdIndex.i++] || "";
+  const pos = slot[0];
+  const grp = slot.slice(1);
+  if (pos === "1") return e.groups?.[grp] || "";
+  if (pos === "2") return e.runnerUps?.[grp] || "";
+  return "";
+}
+
+// Bygg hele bracketen ut fra en deltakers valg.
+// Returnerer { r32:[{id,a,b,winner}], r16:[...], qf:[...], sf:[...], final:{...},
+//              teams: { r16:Set, qf:Set, sf:Set, final:Set, champion } }
+function resolveBracket(e) {
+  const thirdIndex = { i: 0 };
+  const r32 = R32_MATCHES.map((m) => ({
+    id: m.id,
+    a: slotTeam(m.a, e, thirdIndex),
+    b: slotTeam(m.b, e, thirdIndex),
+    winner: e.bracket?.[m.id] || "",
+  }));
+  const winnerOf = (id) => r32.find((m) => m.id === id)?.winner || "";
+
+  const r16 = R16_PAIRS.map((pair, idx) => ({
+    id: `r16_${idx}`,
+    a: winnerOf(pair[0]),
+    b: winnerOf(pair[1]),
+    winner: e.bracket?.[`r16_${idx}`] || "",
+  }));
+  const buildRound = (prev, key) => {
+    const out = [];
+    for (let i = 0; i < prev.length; i += 2) {
+      const id = `${key}_${i / 2}`;
+      out.push({
+        id,
+        a: prev[i]?.winner || "",
+        b: prev[i + 1]?.winner || "",
+        winner: e.bracket?.[id] || "",
+      });
+    }
+    return out;
+  };
+  const qf = buildRound(r16, "qf");
+  const sf = buildRound(qf, "sf");
+  const final = buildRound(sf, "final")[0] || { id: "final_0", a: "", b: "", winner: "" };
+
+  const teamsIn = (arr) => new Set(arr.flatMap((m) => [m.a, m.b]).filter(Boolean));
+  return {
+    r32, r16, qf, sf, final,
+    teams: {
+      r16: teamsIn(r16),
+      qf: teamsIn(qf),
+      sf: teamsIn(sf),
+      final: new Set([final.a, final.b].filter(Boolean)),
+      champion: final.winner || "",
+    },
+  };
+}
+
+// Fjern bracket-valg som ikke lenger er gyldige (laget er ikke lenger
+// en av de to mulige i kampen). Kjøres til ingen flere endringer skjer,
+// slik at en endring tidlig i bracketen forplanter seg oppover.
+function pruneBracket(e) {
+  let entry = { ...e, bracket: { ...(e.bracket || {}) } };
+  for (let iter = 0; iter < 6; iter++) {
+    const bd = resolveBracket(entry);
+    const allMatches = [...bd.r32, ...bd.r16, ...bd.qf, ...bd.sf, bd.final];
+    let changed = false;
+    const bracket = { ...entry.bracket };
+    allMatches.forEach((m) => {
+      const w = bracket[m.id];
+      if (w && w !== m.a && w !== m.b) { delete bracket[m.id]; changed = true; }
+    });
+    entry = { ...entry, bracket };
+    if (!changed) break;
+  }
+  return entry;
+}
+
+function App() {
+  const [view, setView] = useState("tip"); // tip | oversikt | poeng | regler
+  const [section, setSection] = useState("groups");
+  const [entry, setEntry] = useState(emptyEntry());
+  const [allEntries, setAllEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState(false);
+  const [admin, setAdmin] = useState(loadEmptyResults());
+  const [adminOpen, setAdminOpen] = useState(false);
+
+  function loadEmptyResults() {
+    return {
+      groups: {}, runnerUps: {}, thirds: ["", "", "", "", "", "", "", ""],
+      bracket: {},
+      gold: "", silver: "", bronze: "",
+      topScorer: "", topAssist: "", bestKeeper: "", norwayFinish: "",
+      finalGoals: "",
+    };
+  }
+
+  // Firebase: live-synk av alle tips + fasit
+  useEffect(() => {
+    if (!window.__db) { setLoading(false); return; }
+    const { db, fns } = window.__db;
+    const unsubTips = fns.onSnapshot(fns.collection(db, "tips"), (snap) => {
+      const entries = [];
+      snap.forEach((doc) => entries.push(doc.data()));
+      setAllEntries(entries);
+      setLoading(false);
+    }, (err) => { console.error(err); setLoading(false); });
+    const unsubFasit = fns.onSnapshot(fns.doc(db, "meta", "fasit"), (d) => {
+      if (d.exists()) setAdmin(d.data());
+    });
+    return () => { unsubTips(); unsubFasit(); };
+  }, []);
+
+  function keyFor(name) {
+    return name.trim().toLowerCase().replace(/[^a-z0-9]/g, "_");
+  }
+
+  async function saveEntry() {
+    if (isLocked()) { alert("Fristen har gått ut – tips er låst og kan ikke endres."); return; }
+    if (!entry.name.trim()) { alert("Skriv inn navnet ditt først!"); return; }
+    if (!window.__db) { alert("Firebase er ikke konfigurert ennå."); return; }
+    const { db, fns } = window.__db;
+    const payload = JSON.parse(JSON.stringify({ ...entry, submittedAt: Date.now() }));
+    try {
+      await fns.setDoc(fns.doc(db, "tips", keyFor(entry.name)), payload);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) { alert("Klarte ikke å lagre: " + e.message); }
+  }
+
+  async function loadMyEntry() {
+    if (!entry.name.trim()) { alert("Skriv navnet ditt for å hente tipset ditt."); return; }
+    const existing = allEntries.find((x) => keyFor(x.name) === keyFor(entry.name));
+    if (existing) { setEntry(existing); alert("Tipset ditt er hentet – du kan endre og lagre på nytt."); }
+    else { alert("Fant ikke noe lagret tips på det navnet ennå."); }
+  }
+
+  async function saveFasit() {
+    if (!window.__db) { alert("Firebase er ikke konfigurert ennå."); return; }
+    const { db, fns } = window.__db;
+    try {
+      await fns.setDoc(fns.doc(db, "meta", "fasit"), JSON.parse(JSON.stringify(admin)));
+      alert("Fasit lagret. Poengtavlen er oppdatert for alle.");
+    } catch (e) { alert("Klarte ikke å lagre fasit: " + e.message); }
+  }
+
+  // ---- Poengberegning ----
+  function scoreFor(e) {
+    let pts = 0;
+    const detail = [];
+    Object.keys(GROUPS).forEach((g) => {
+      if (admin.groups[g] && e.groups[g] === admin.groups[g]) {
+        pts += POINTS.groupWinner;
+        detail.push(`Gruppe ${g} vinner: +${POINTS.groupWinner}`);
+      }
+      if (admin.runnerUps[g] && e.runnerUps[g] === admin.runnerUps[g]) {
+        pts += POINTS.groupRunnerUp;
+        detail.push(`Gruppe ${g} toer: +${POINTS.groupRunnerUp}`);
+      }
+    });
+
+    // Sluttspill: 1 poeng per lag du har riktig i hver runde
+    const fasitB = resolveBracket(admin);
+    const eB = resolveBracket(e);
+    const rounds = [
+      ["r16", "8-delsfinale"],
+      ["qf", "Kvartfinale"],
+      ["sf", "Semifinale"],
+      ["final", "Finale"],
+    ];
+    rounds.forEach(([key, lbl]) => {
+      const fasitSet = fasitB.teams[key];
+      if (!fasitSet || fasitSet.size === 0) return;
+      let hits = 0;
+      eB.teams[key].forEach((team) => { if (team && fasitSet.has(team)) hits++; });
+      if (hits > 0) {
+        pts += hits * POINTS.bracketTeam;
+        detail.push(`${lbl}: ${hits} riktig +${hits * POINTS.bracketTeam}`);
+      }
+    });
+
+    if (admin.gold && e.gold === admin.gold) { pts += POINTS.gold; detail.push(`Gull: +${POINTS.gold}`); }
+    if (admin.silver && e.silver === admin.silver) { pts += POINTS.silver; detail.push(`Sølv: +${POINTS.silver}`); }
+    if (admin.bronze && e.bronze === admin.bronze) { pts += POINTS.bronze; detail.push(`Bronse: +${POINTS.bronze}`); }
+    if (admin.topScorer && e.topScorer === admin.topScorer) { pts += POINTS.topScorer; detail.push(`Toppscorer: +${POINTS.topScorer}`); }
+    if (admin.topAssist && e.topAssist === admin.topAssist) { pts += POINTS.topAssist; detail.push(`Flest assist: +${POINTS.topAssist}`); }
+    if (admin.bestKeeper && e.bestKeeper === admin.bestKeeper) { pts += POINTS.bestKeeper; detail.push(`Beste keeper: +${POINTS.bestKeeper}`); }
+    if (admin.norwayFinish && e.norwayFinish === admin.norwayFinish) { pts += POINTS.norwayFinish; detail.push(`Norge: +${POINTS.norwayFinish}`); }
+    return { pts, detail };
+  }
+
+  const hasFasit = Object.values(admin.groups).some(Boolean) ||
+    Object.values(admin.runnerUps).some(Boolean) ||
+    Object.values(admin.bracket || {}).some(Boolean) ||
+    admin.gold || admin.silver || admin.bronze || admin.topScorer ||
+    admin.topAssist || admin.bestKeeper || admin.norwayFinish;
+
+  // Skilletips: nærmest faktisk antall mål i finalen vinner ved poenglikhet.
+  const fasitFinalGoals = admin.finalGoals !== "" && admin.finalGoals != null
+    ? parseInt(admin.finalGoals, 10) : null;
+  const goalDiff = (e) => {
+    if (fasitFinalGoals == null) return null;
+    const g = e.finalGoals !== "" && e.finalGoals != null ? parseInt(e.finalGoals, 10) : null;
+    if (g == null || isNaN(g)) return Infinity; // ingen tips = dårligst
+    return Math.abs(g - fasitFinalGoals);
+  };
+
+  const leaderboard = [...allEntries]
+    .map((e) => ({ ...e, score: scoreFor(e), _diff: goalDiff(e) }))
+    .sort((a, b) => {
+      if (b.score.pts !== a.score.pts) return b.score.pts - a.score.pts;
+      // poenglikhet → bruk skilletips hvis fasit-finalemål er satt
+      if (a._diff == null || b._diff == null) return 0;
+      return a._diff - b._diff;
+    });
+
+  // ---------- UI helpers ----------
+  const styles = {
+    wrap: { fontFamily: "'Cormorant Garamond', Georgia, serif", background: c.cream, color: c.ink, minHeight: "100%", padding: "0 0 60px" },
+    inner: { maxWidth: 860, margin: "0 auto", padding: "0 20px" },
+    h1: { fontFamily: "'Cormorant Garamond', serif", fontWeight: 700, fontSize: 46, letterSpacing: 1, margin: "6px 0 0", textAlign: "center" },
+    sub: { textAlign: "center", fontSize: 18, color: c.gold, letterSpacing: 4, textTransform: "uppercase", marginTop: 2 },
+    nav: { display: "flex", justifyContent: "center", gap: 6, flexWrap: "wrap", margin: "22px 0 8px" },
+    tab: (active) => ({
+      fontFamily: "'Cormorant Garamond', serif", fontSize: 17, padding: "8px 18px",
+      border: `1px solid ${active ? c.gold : c.line}`, background: active ? c.ink : "transparent",
+      color: active ? c.goldSoft : c.ink, borderRadius: 2, cursor: "pointer", letterSpacing: 1,
+    }),
+    card: { background: "#fff", border: `1px solid ${c.line}`, borderRadius: 4, padding: "22px 24px", marginTop: 16, boxShadow: "0 1px 0 rgba(0,0,0,0.03)" },
+    label: { display: "block", fontSize: 16, color: c.ink, marginBottom: 4, fontWeight: 600, letterSpacing: 0.5 },
+    input: { width: "100%", padding: "9px 11px", fontFamily: "'Cormorant Garamond', serif", fontSize: 17, border: `1px solid ${c.line}`, borderRadius: 3, background: c.cream, boxSizing: "border-box" },
+    select: { width: "100%", padding: "9px 11px", fontFamily: "'Cormorant Garamond', serif", fontSize: 17, border: `1px solid ${c.line}`, borderRadius: 3, background: c.cream, boxSizing: "border-box" },
+    btn: { fontFamily: "'Cormorant Garamond', serif", fontSize: 18, padding: "11px 26px", background: c.ink, color: c.goldSoft, border: `1px solid ${c.gold}`, borderRadius: 3, cursor: "pointer", letterSpacing: 1 },
+    btnGhost: { fontFamily: "'Cormorant Garamond', serif", fontSize: 16, padding: "10px 20px", background: "transparent", color: c.ink, border: `1px solid ${c.line}`, borderRadius: 3, cursor: "pointer" },
+    sectTab: (active) => ({
+      fontFamily: "'Cormorant Garamond', serif", fontSize: 16, padding: "6px 14px", cursor: "pointer",
+      borderBottom: `2px solid ${active ? c.gold : "transparent"}`, color: active ? c.ink : "#8a8470", background: "transparent", border: "none",
+    }),
+    rule: { border: "none", borderTop: `1px solid ${c.line}`, margin: "18px 0" },
+    pill: { display: "inline-block", background: c.goldSoft, color: c.ink, fontSize: 13, padding: "2px 9px", borderRadius: 20, marginLeft: 6 },
+  };
+
+  function field({ label, value, onChange, options, placeholder, key }) {
+    return (
+      <div key={key} style={{ marginBottom: 14 }}>
+        <label style={styles.label}>{label}</label>
+        {options ? (
+          <select style={styles.select} value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="">– velg –</option>
+            {options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        ) : (
+          <input style={styles.input} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+        )}
+      </div>
+    );
+  }
+
+  // ---------- Bracket-editor (brukes både for tips og fasit) ----------
+  function bracketEditor(target) {
+    const data = target === "admin" ? admin : entry;
+    const setData = target === "admin" ? setAdmin : setEntry;
+
+    // Endrer en treer og rydder opp bracket-valg som ikke lenger er gyldige
+    const setThird = (idx, val) => {
+      const thirds = [...(data.thirds || ["", "", "", "", "", "", "", ""])];
+      thirds[idx] = val;
+      setData(pruneBracket({ ...data, thirds }));
+    };
+    // Velg vinner i en kamp, og nullstill nedstrøms valg som blir ugyldige
+    const setWinner = (matchId, team) => {
+      const bracket = { ...(data.bracket || {}) };
+      bracket[matchId] = team;
+      setData(pruneBracket({ ...data, bracket }));
+    };
+
+    const bd = resolveBracket(data);
+
+    // Alle lag som kan være treer (alle 48)
+    const allTeams = Object.values(GROUPS).flat().sort((a, b) => a.localeCompare(b, "no"));
+
+    const matchRow = (m) => {
+      return (
+        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <div style={{ flex: 1, display: "flex", gap: 6 }}>
+            {["a", "b"].map((side) => {
+              const team = m[side];
+              const chosen = m.winner === team && team;
+              return (
+                <button key={side}
+                  onClick={() => team && setWinner(m.id, team)}
+                  disabled={!team}
+                  style={{
+                    flex: 1, textAlign: "left", padding: "8px 10px", fontSize: 16,
+                    fontFamily: "'Cormorant Garamond', serif", cursor: team ? "pointer" : "default",
+                    border: `1px solid ${chosen ? c.gold : c.line}`,
+                    background: chosen ? c.ink : (team ? c.cream : "#f0ece0"),
+                    color: chosen ? c.goldSoft : (team ? c.ink : "#b3a982"),
+                    borderRadius: 3,
+                  }}>
+                  {team || "— venter —"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    const roundBlock = (title, matches, points) => (
+      <div style={{ marginBottom: 18 }}>
+        <h4 style={{ margin: "0 0 8px", fontSize: 19 }}>
+          {title} {points && <span style={styles.pill}>{points}</span>}
+        </h4>
+        {matches.map((m) => matchRow(m))}
+      </div>
+    );
+
+    return (
+      <>
+        <h3 style={{ margin: "0 0 4px", fontSize: 24 }}>Sluttspill – bracket <span style={styles.pill}>1p per riktig lag per runde</span></h3>
+        <p style={{ fontSize: 15, color: "#8a8470", marginTop: 0 }}>
+          Velg vinneren i hver kamp ved å trykke på laget. Vinneren går automatisk videre til neste runde.
+          Fyll inn gruppevinnere og toere først (under «Gruppevinnere & toere»), og de 8 beste treerne nedenfor.
+        </p>
+
+        <div style={{ background: c.cream, border: `1px solid ${c.line}`, borderRadius: 4, padding: "12px 14px", marginBottom: 16 }}>
+          <h4 style={{ margin: "0 0 6px", fontSize: 18 }}>De 8 beste treerne</h4>
+          <p style={{ fontSize: 14, color: "#8a8470", marginTop: 0 }}>
+            8 av 12 treere går videre. Velg hvilke du tror går videre – de plasseres i «3*»-plassene i bracketen.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px,1fr))", gap: "0 12px" }}>
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+              const chosenElsewhere = (data.thirds || []).filter((_, j) => j !== i);
+              const opts = allTeams.filter((t) => !chosenElsewhere.includes(t));
+              return field({ key: i, label: `Treer ${i + 1}`, options: opts, value: (data.thirds || [])[i] || "", onChange: (v) => setThird(i, v) });
+            })}
+          </div>
+        </div>
+
+        {roundBlock(ROUND_LABELS.r32, bd.r32, "velg 16 vinnere")}
+        <hr style={styles.rule} />
+        {roundBlock(ROUND_LABELS.r16, bd.r16, "1p × 16 lag")}
+        {roundBlock(ROUND_LABELS.qf, bd.qf, "1p × 8 lag")}
+        {roundBlock(ROUND_LABELS.sf, bd.sf, "1p × 4 lag")}
+        {roundBlock(ROUND_LABELS.final, [bd.final], "1p × 2 lag")}
+
+        {bd.final.winner && (
+          <div style={{ textAlign: "center", padding: "14px", background: c.goldSoft, borderRadius: 4, fontSize: 20, fontWeight: 700 }}>
+            🏆 Din verdensmester: {bd.final.winner}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ---------- Tipping-skjema ----------
+  function tipForm() {
+    const locked = isLocked();
+    return (
+      <>
+        <div style={{
+          ...styles.card,
+          background: locked ? "#f6e4e0" : "#eef3ec",
+          border: `1px solid ${locked ? c.red : c.green}`,
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 22 }}>{locked ? "🔒" : "⏳"}</span>
+          <span style={{ fontSize: 16 }}>
+            {locked
+              ? <>Fristen gikk ut <strong>{deadlineText()}</strong>. Tips er nå låst og kan ikke endres.</>
+              : <>Frist for innlevering: <strong>{deadlineText()}</strong> (åpningskampen). Du kan endre tipset ditt fram til da.</>}
+          </span>
+        </div>
+
+        <div style={styles.card}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 240px" }}>
+              <label style={styles.label}>Navnet ditt</label>
+              <input style={styles.input} value={entry.name} placeholder="F.eks. Eirik" onChange={(e) => setEntry({ ...entry, name: e.target.value })} />
+            </div>
+            <button style={styles.btnGhost} onClick={loadMyEntry}>Hent mitt tips</button>
+          </div>
+          <p style={{ fontSize: 15, color: "#8a8470", marginTop: 8 }}>
+            Bruk samme navn hver gang, så kan du redigere tipset ditt. Tipsene deles med alle på kontoret.
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${c.line}`, marginTop: 20, flexWrap: "wrap" }}>
+          {SECTIONS.map((s) => (
+            <button key={s.key} style={styles.sectTab(section === s.key)} onClick={() => setSection(s.key)}>{s.label}</button>
+          ))}
+        </div>
+
+        <div style={styles.card}>
+          {section === "groups" && (
+            <>
+              <h3 style={{ margin: "0 0 4px", fontSize: 24 }}>Gruppevinnere & toere <span style={styles.pill}>{POINTS.groupWinner}p / {POINTS.groupRunnerUp}p</span></h3>
+              <p style={{ fontSize: 15, color: "#8a8470", marginTop: 0 }}>
+                Tips vinner (1.-plass) og toer (2.-plass) i hver gruppe. Disse mater inn i sluttspill-bracketen.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "0 18px" }}>
+                {Object.keys(GROUPS).map((g) => (
+                  <div key={g} style={{ border: `1px solid ${c.line}`, borderRadius: 4, padding: "10px 12px", marginBottom: 12 }}>
+                    <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 6 }}>Gruppe {g}</div>
+                    {field({ label: "🥇 Vinner", options: GROUPS[g], value: entry.groups[g] || "", onChange: (v) => setEntry(pruneBracket({ ...entry, groups: { ...entry.groups, [g]: v }, runnerUps: { ...entry.runnerUps, [g]: entry.runnerUps[g] === v ? "" : entry.runnerUps[g] } })) })}
+                    {field({ label: "🥈 Toer", options: GROUPS[g].filter((t) => t !== entry.groups[g]), value: entry.runnerUps[g] || "", onChange: (v) => setEntry(pruneBracket({ ...entry, runnerUps: { ...entry.runnerUps, [g]: v } })) })}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {section === "bracket" && bracketEditor("entry")}
+
+
+          {section === "medals" && (
+            <>
+              <h3 style={{ margin: "0 0 4px", fontSize: 24 }}>Medaljer</h3>
+              {field({ label: `🥇 Gull – verdensmester (${POINTS.gold}p)`, options: FAVORITES, value: entry.gold, onChange: (v) => setEntry({ ...entry, gold: v }) })}
+              {field({ label: `🥈 Sølv – finaletaper (${POINTS.silver}p)`, options: FAVORITES, value: entry.silver, onChange: (v) => setEntry({ ...entry, silver: v }) })}
+              {field({ label: `🥉 Bronse (${POINTS.bronze}p)`, options: FAVORITES, value: entry.bronze, onChange: (v) => setEntry({ ...entry, bronze: v }) })}
+            </>
+          )}
+
+          {section === "individual" && (
+            <>
+              <h3 style={{ margin: "0 0 4px", fontSize: 24 }}>Individuelle priser</h3>
+              {field({ label: `Flest mål – gullstøvel (${POINTS.topScorer}p)`, options: PLAYERS, value: entry.topScorer, onChange: (v) => setEntry({ ...entry, topScorer: v }) })}
+              {field({ label: `Flest assist (${POINTS.topAssist}p)`, options: PLAYERS, value: entry.topAssist, onChange: (v) => setEntry({ ...entry, topAssist: v }) })}
+              {field({ label: `Beste keeper – gullhansken (${POINTS.bestKeeper}p)`, value: entry.bestKeeper, placeholder: "Navn på keeper", onChange: (v) => setEntry({ ...entry, bestKeeper: v }) })}
+            </>
+          )}
+
+          {section === "norway" && (
+            <>
+              <h3 style={{ margin: "0 0 4px", fontSize: 24 }}>Norge & tiebreaker</h3>
+              {field({ label: `Hvor langt går Norge? (${POINTS.norwayFinish}p)`, options: NORWAY_OPTIONS, value: entry.norwayFinish, onChange: (v) => setEntry({ ...entry, norwayFinish: v }) })}
+              {field({ label: "Skilletips: antall mål totalt i finalen", value: entry.finalGoals, placeholder: "F.eks. 3", onChange: (v) => setEntry({ ...entry, finalGoals: v.replace(/[^0-9]/g, "") }) })}
+              <p style={{ fontSize: 15, color: "#8a8470" }}>Skilletipset brukes kun ved poenglikhet på topp.</p>
+            </>
+          )}
+
+          <hr style={styles.rule} />
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <button
+              style={{ ...styles.btn, opacity: locked ? 0.5 : 1, cursor: locked ? "not-allowed" : "pointer" }}
+              onClick={saveEntry}
+              disabled={locked}>
+              {locked ? "Tips er låst" : "Lagre tipset mitt"}
+            </button>
+            {saved && <span style={{ color: c.green, fontSize: 17 }}>✓ Lagret!</span>}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ---------- Oversikt ----------
+  function oversikt() {
+    if (allEntries.length === 0) return <div style={styles.card}><p style={{ fontSize: 18 }}>Ingen tips levert ennå. Vær først ute!</p></div>;
+    return (
+      <div style={styles.card}>
+        <h3 style={{ marginTop: 0, fontSize: 24 }}>Hvem tipper hva ({allEntries.length} deltakere)</h3>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 16 }}>
+            <thead>
+              <tr style={{ textAlign: "left", borderBottom: `2px solid ${c.gold}` }}>
+                <th style={{ padding: "6px 10px" }}>Navn</th>
+                <th style={{ padding: "6px 10px" }}>🥇 Gull</th>
+                <th style={{ padding: "6px 10px" }}>🥈 Sølv</th>
+                <th style={{ padding: "6px 10px" }}>🥉 Bronse</th>
+                <th style={{ padding: "6px 10px" }}>Toppscorer</th>
+                <th style={{ padding: "6px 10px" }}>Norge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allEntries.map((e, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${c.line}` }}>
+                  <td style={{ padding: "6px 10px", fontWeight: 600 }}>{e.name}</td>
+                  <td style={{ padding: "6px 10px" }}>{e.gold || "–"}</td>
+                  <td style={{ padding: "6px 10px" }}>{e.silver || "–"}</td>
+                  <td style={{ padding: "6px 10px" }}>{e.bronze || "–"}</td>
+                  <td style={{ padding: "6px 10px" }}>{e.topScorer || "–"}</td>
+                  <td style={{ padding: "6px 10px" }}>{e.norwayFinish || "–"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- Poengtavle ----------
+  function poeng() {
+    return (
+      <>
+        <div style={styles.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <h3 style={{ margin: 0, fontSize: 24 }}>Poengtavle</h3>
+            <button style={styles.btnGhost} onClick={() => setAdminOpen(!adminOpen)}>{adminOpen ? "Skjul fasit" : "Legg inn fasit (arrangør)"}</button>
+          </div>
+          {!hasFasit && <p style={{ fontSize: 17, color: "#8a8470" }}>Fasit er ikke lagt inn ennå. Poeng dukker opp etter hvert som arrangøren fyller inn resultater.</p>}
+          {allEntries.length === 0 ? <p style={{ fontSize: 17 }}>Ingen tips levert ennå.</p> : (
+            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 17, marginTop: 10 }}>
+              <thead>
+                <tr style={{ textAlign: "left", borderBottom: `2px solid ${c.gold}` }}>
+                  <th style={{ padding: "8px 10px", width: 40 }}>#</th>
+                  <th style={{ padding: "8px 10px" }}>Navn</th>
+                  <th style={{ padding: "8px 10px", textAlign: "right" }}>Poeng</th>
+                  <th style={{ padding: "8px 10px" }}>Skilletips (finalemål)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaderboard.map((e, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${c.line}`, background: i === 0 && hasFasit ? c.goldSoft : "transparent" }}>
+                    <td style={{ padding: "8px 10px" }}>{i + 1}</td>
+                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{e.name}{i === 0 && hasFasit ? " 👑" : ""}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: c.green }}>{e.score.pts}</td>
+                    <td style={{ padding: "8px 10px", color: "#8a8470" }}>{e.finalGoals || "–"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {adminOpen && (
+          <div style={styles.card}>
+            <h3 style={{ marginTop: 0, fontSize: 22 }}>Fasit – fylles inn av arrangør</h3>
+            <p style={{ fontSize: 15, color: c.red }}>Obs: dette deles med alle og oppdaterer poengtavlen for alle.</p>
+            <h4 style={{ marginBottom: 6 }}>Gruppevinnere & toere</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "0 16px" }}>
+              {Object.keys(GROUPS).map((g) => (
+                <div key={g} style={{ border: `1px solid ${c.line}`, borderRadius: 4, padding: "8px 10px", marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Gruppe {g}</div>
+                  {field({ label: "🥇 Vinner", options: GROUPS[g], value: admin.groups[g] || "", onChange: (v) => setAdmin(pruneBracket({ ...admin, groups: { ...admin.groups, [g]: v }, runnerUps: { ...admin.runnerUps, [g]: admin.runnerUps[g] === v ? "" : admin.runnerUps[g] } })) })}
+                  {field({ label: "🥈 Toer", options: GROUPS[g].filter((t) => t !== admin.groups[g]), value: admin.runnerUps[g] || "", onChange: (v) => setAdmin(pruneBracket({ ...admin, runnerUps: { ...admin.runnerUps, [g]: v } })) })}
+                </div>
+              ))}
+            </div>
+            <hr style={styles.rule} />
+            <h4 style={{ marginBottom: 6 }}>Sluttspill (fasit)</h4>
+            {bracketEditor("admin")}
+            <hr style={styles.rule} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "0 16px" }}>
+              {field({ label: "🥇 Gull", options: FAVORITES, value: admin.gold, onChange: (v) => setAdmin({ ...admin, gold: v }) })}
+              {field({ label: "🥈 Sølv", options: FAVORITES, value: admin.silver, onChange: (v) => setAdmin({ ...admin, silver: v }) })}
+              {field({ label: "🥉 Bronse", options: FAVORITES, value: admin.bronze, onChange: (v) => setAdmin({ ...admin, bronze: v }) })}
+              {field({ label: "Toppscorer", options: PLAYERS, value: admin.topScorer, onChange: (v) => setAdmin({ ...admin, topScorer: v }) })}
+              {field({ label: "Flest assist", options: PLAYERS, value: admin.topAssist, onChange: (v) => setAdmin({ ...admin, topAssist: v }) })}
+              {field({ label: "Beste keeper", value: admin.bestKeeper, onChange: (v) => setAdmin({ ...admin, bestKeeper: v }) })}
+              {field({ label: "Norge sluttplassering", options: NORWAY_OPTIONS, value: admin.norwayFinish, onChange: (v) => setAdmin({ ...admin, norwayFinish: v }) })}
+              {field({ label: "Antall mål i finalen (skilletips)", value: admin.finalGoals || "", placeholder: "F.eks. 3", onChange: (v) => setAdmin({ ...admin, finalGoals: v.replace(/[^0-9]/g, "") }) })}
+            </div>
+            <button style={styles.btn} onClick={saveFasit}>Lagre fasit</button>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ---------- Regler ----------
+  function regler() {
+    return (
+      <div style={styles.card}>
+        <h3 style={{ marginTop: 0, fontSize: 24 }}>Regler & poeng</h3>
+        <p style={{ fontSize: 17 }}>Riktig svar gir poeng. Den med flest poeng når VM er ferdig vinner kontorpotten.</p>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 17 }}>
+          <tbody>
+            {[
+              ["Riktig gruppevinner (× 12 grupper)", `${POINTS.groupWinner}p`],
+              ["Riktig gruppetoer (× 12 grupper)", `${POINTS.groupRunnerUp}p`],
+              ["Sluttspill: riktig lag i 8-delsfinale (× 16)", `${POINTS.bracketTeam}p`],
+              ["Sluttspill: riktig lag i kvartfinale (× 8)", `${POINTS.bracketTeam}p`],
+              ["Sluttspill: riktig lag i semifinale (× 4)", `${POINTS.bracketTeam}p`],
+              ["Sluttspill: riktig lag i finale (× 2)", `${POINTS.bracketTeam}p`],
+              ["🥇 Riktig gull / verdensmester", `${POINTS.gold}p`],
+              ["🥈 Riktig sølv", `${POINTS.silver}p`],
+              ["🥉 Riktig bronse", `${POINTS.bronze}p`],
+              ["Riktig toppscorer (gullstøvel)", `${POINTS.topScorer}p`],
+              ["Riktig flest assist", `${POINTS.topAssist}p`],
+              ["Riktig beste keeper", `${POINTS.bestKeeper}p`],
+              ["Riktig Norge-plassering", `${POINTS.norwayFinish}p`],
+            ].map(([k, v]) => (
+              <tr key={k} style={{ borderBottom: `1px solid ${c.line}` }}>
+                <td style={{ padding: "8px 10px" }}>{k}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: c.gold }}>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 16, color: "#8a8470", marginTop: 14 }}>
+          Sluttspillet gir 1 poeng per lag du har riktig i hver runde (maks 16+8+4+2 = 30 poeng på bracketen).
+          Lagene mates videre fra dine egne kampvalg, så det lønner seg å tenke realistisk.
+          Ved poenglikhet på topp avgjør skilletipset (nærmest antall mål i finalen).
+        </p>
+        <hr style={styles.rule} />
+        <p style={{ fontSize: 16 }}>
+          <strong>Frist:</strong> alle tips bør være levert før åpningskampen <strong>11. juni kl. 21.00</strong> (norsk tid).
+          Norge åpner mot Irak natt til 17. juni. Finalen spilles 19. juli på MetLife Stadium, New Jersey.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.wrap}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&display=swap');`}</style>
+      <div style={{ background: c.ink, padding: "26px 0 22px", borderBottom: `3px solid ${c.gold}` }}>
+        <div style={styles.inner}>
+          <div style={{ textAlign: "center", color: c.gold, fontSize: 28, letterSpacing: 8 }}>★ ★ ★</div>
+          <h1 style={{ ...styles.h1, color: "#fff" }}>VM-TIPPING 2026</h1>
+          <div style={styles.sub}>Kontorets verdensmesterskap</div>
+        </div>
+      </div>
+
+      <div style={styles.inner}>
+        <div style={styles.nav}>
+          <button style={styles.tab(view === "tip")} onClick={() => setView("tip")}>Tipp</button>
+          <button style={styles.tab(view === "oversikt")} onClick={() => setView("oversikt")}>Oversikt</button>
+          <button style={styles.tab(view === "poeng")} onClick={() => setView("poeng")}>Poengtavle</button>
+          <button style={styles.tab(view === "regler")} onClick={() => setView("regler")}>Regler</button>
+        </div>
+
+        {loading ? <div style={styles.card}><p style={{ fontSize: 18 }}>Laster …</p></div> : (
+          <>
+            {view === "tip" && tipForm()}
+            {view === "oversikt" && oversikt()}
+            {view === "poeng" && poeng()}
+            {view === "regler" && regler()}
+          </>
+        )}
+        <p style={{ textAlign: "center", fontSize: 14, color: "#b3a982", marginTop: 30 }}>
+          USA · Mexico · Canada — 11. juni–19. juli 2026
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+const container = document.getElementById("root");
+const root = ReactDOM.createRoot(container);
+
+function mount() {
+  if (!window.__db) {
+    container.insertAdjacentHTML("beforeend",
+      '<div id="fb-warning"><h2>Nesten klar!</h2>' +
+      '<p>Firebase-nøklene er ikke fylt inn ennå. Åpne HTML-fila, finn <code>firebaseConfig</code> øverst, ' +
+      'og lim inn nøklene fra Firebase-konsollen. Se <code>SETUP-firebase.md</code> for steg-for-steg.</p>' +
+      '<p>Appen vises fortsatt nedenfor, men tips lagres ikke før Firebase er koblet til.</p></div>');
+  }
+  root.render(<App />);
+}
+// Vent et øyeblikk så Firebase-modulen rekker å sette window.__db
+setTimeout(mount, 300);
+</script>
+</body>
+</html>
