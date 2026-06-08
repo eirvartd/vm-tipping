@@ -32,7 +32,7 @@
     getFirestore, collection, doc, setDoc, onSnapshot
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-  // 🔑 LIM INN DIN EGEN FIREBASE-KONFIG HER:
+// 🔑 LIM INN DIN EGEN FIREBASE-KONFIG HER:
 const firebaseConfig = {
   apiKey: "AIzaSyDUsU8cMm8LA2mTTTvlGdoJoEeq8aoxfVI",
   authDomain: "vm-tipping-kontor.firebaseapp.com",
@@ -41,6 +41,7 @@ const firebaseConfig = {
   messagingSenderId: "186411096564",
   appId: "1:186411096564:web:58c5568c077750a85ec1a1"
 };
+
 
   // Bare koble til hvis konfig faktisk er fylt inn
   if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "DIN_API_KEY") {
@@ -118,24 +119,24 @@ const SECTIONS = [
 // eller en av de beste treerne ("3*") som deltakeren plasserer selv.
 // Oppsettet følger FIFAs offisielle bracket for VM 2026.
 const R32_MATCHES = [
-  { id: "m73", a: "1A", b: "3*" },
-  { id: "m74", a: "1C", b: "3*" },
-  { id: "m75", a: "1E", b: "3*" },
-  { id: "m76", a: "1G", b: "3*" },
+  { id: "m73", a: "2A", b: "2B" },
+  { id: "m74", a: "1E", b: "3*" },
+  { id: "m75", a: "1F", b: "2C" },
+  { id: "m76", a: "1C", b: "2F" },
   { id: "m77", a: "1I", b: "3*" },
-  { id: "m78", a: "1K", b: "3*" },
-  { id: "m79", a: "2A", b: "2B" },
-  { id: "m80", a: "1B", b: "3*" },
+  { id: "m78", a: "2E", b: "2I" },
+  { id: "m79", a: "1A", b: "3*" },
+  { id: "m80", a: "1L", b: "3*" },
   { id: "m81", a: "1D", b: "3*" },
-  { id: "m82", a: "1F", b: "3*" },
-  { id: "m83", a: "1H", b: "3*" },
-  { id: "m84", a: "1J", b: "3*" },
-  { id: "m85", a: "1L", b: "3*" },
-  { id: "m86", a: "2C", b: "2D" },
-  { id: "m87", a: "2E", b: "2F" },
-  { id: "m88", a: "2I", b: "2L" },
+  { id: "m82", a: "1G", b: "3*" },
+  { id: "m83", a: "2K", b: "2L" },
+  { id: "m84", a: "1H", b: "2J" },
+  { id: "m85", a: "1B", b: "3*" },
+  { id: "m86", a: "1J", b: "2H" },
+  { id: "m87", a: "1K", b: "3*" },
+  { id: "m88", a: "2D", b: "2G" },
 ];
-// 16-delsfinale (Round of 16) – vinnerne fra R32 møtes parvis
+// 16-delsfinale (Round of 16) – vinnerne fra R32 møtes parvis (FIFAs bracket-tre)
 const R16_PAIRS = [
   ["m73", "m74"], ["m75", "m76"], ["m77", "m78"], ["m79", "m80"],
   ["m81", "m82"], ["m83", "m84"], ["m85", "m86"], ["m87", "m88"],
@@ -456,10 +457,15 @@ function App() {
       thirds[idx] = val;
       setData(pruneBracket({ ...data, thirds }));
     };
-    // Velg vinner i en kamp, og nullstill nedstrøms valg som blir ugyldige
+    // Velg vinner i en kamp. Trykker du på laget som allerede er valgt,
+    // fjernes markeringen. Nedstrøms valg som blir ugyldige nullstilles.
     const setWinner = (matchId, team) => {
       const bracket = { ...(data.bracket || {}) };
-      bracket[matchId] = team;
+      if (bracket[matchId] === team) {
+        delete bracket[matchId]; // toggle av – angre valget
+      } else {
+        bracket[matchId] = team;
+      }
       setData(pruneBracket({ ...data, bracket }));
     };
 
@@ -467,6 +473,12 @@ function App() {
 
     // Alle lag som kan være treer (alle 48)
     const allTeams = Object.values(GROUPS).flat().sort((a, b) => a.localeCompare(b, "no"));
+    // Lag som allerede er valgt som gruppevinner eller toer – disse går videre
+    // på egen plass og kan ikke også velges som treer.
+    const usedInGroups = [
+      ...Object.values(data.groups || {}),
+      ...Object.values(data.runnerUps || {}),
+    ].filter(Boolean);
 
     const matchRow = (m) => {
       return (
@@ -510,6 +522,7 @@ function App() {
         <h3 style={{ margin: "0 0 4px", fontSize: 24 }}>Sluttspill – bracket <span style={styles.pill}>1p per riktig lag per runde</span></h3>
         <p style={{ fontSize: 15, color: "#8a8470", marginTop: 0 }}>
           Velg vinneren i hver kamp ved å trykke på laget. Vinneren går automatisk videre til neste runde.
+          Trykk på samme lag en gang til for å angre valget.
           Fyll inn gruppevinnere og toere først (under «Gruppevinnere & toere»), og de 8 beste treerne nedenfor.
         </p>
 
@@ -521,8 +534,12 @@ function App() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px,1fr))", gap: "0 12px" }}>
             {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
               const chosenElsewhere = (data.thirds || []).filter((_, j) => j !== i);
-              const opts = allTeams.filter((t) => !chosenElsewhere.includes(t));
-              return field({ key: i, label: `Treer ${i + 1}`, options: opts, value: (data.thirds || [])[i] || "", onChange: (v) => setThird(i, v) });
+              const current = (data.thirds || [])[i] || "";
+              const opts = allTeams.filter((t) =>
+                !chosenElsewhere.includes(t) &&
+                (!usedInGroups.includes(t) || t === current)
+              );
+              return field({ key: i, label: `Treer ${i + 1}`, options: opts, value: current, onChange: (v) => setThird(i, v) });
             })}
           </div>
         </div>
