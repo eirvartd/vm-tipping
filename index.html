@@ -18,7 +18,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-<!-- Firebase (compat-versjon: vanlige script-tagger, INGEN import) -->
+<!-- Firebase (compat-versjon: vanlige script-tagger) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
@@ -820,7 +820,6 @@ function App() {
 
   return (
     <div style={styles.wrap}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&display=swap');`}</style>
       <div style={{ background: c.ink, padding: "26px 0 22px", borderBottom: `3px solid ${c.gold}` }}>
         <div style={styles.inner}>
           <div style={{ textAlign: "center", color: c.gold, fontSize: 28, letterSpacing: 8 }}>★ ★ ★</div>
