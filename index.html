@@ -124,68 +124,68 @@ const SECTIONS = [{
 // Oppsettet følger FIFAs offisielle bracket for VM 2026.
 const R32_MATCHES = [{
   id: "m73",
-  a: "2A",
-  b: "2B"
-}, {
-  id: "m74",
   a: "1E",
   b: "3*"
 }, {
-  id: "m75",
-  a: "1F",
-  b: "2C"
-}, {
-  id: "m76",
-  a: "1C",
-  b: "2F"
-}, {
-  id: "m77",
+  id: "m74",
   a: "1I",
   b: "3*"
 }, {
-  id: "m78",
-  a: "2E",
-  b: "2I"
+  id: "m75",
+  a: "2A",
+  b: "1B"
 }, {
-  id: "m79",
-  a: "1A",
-  b: "3*"
+  id: "m76",
+  a: "1F",
+  b: "2C"
 }, {
-  id: "m80",
-  a: "1L",
-  b: "3*"
-}, {
-  id: "m81",
-  a: "1D",
-  b: "3*"
-}, {
-  id: "m82",
-  a: "1G",
-  b: "3*"
-}, {
-  id: "m83",
-  a: "2K",
+  id: "m77",
+  a: "1K",
   b: "2L"
 }, {
-  id: "m84",
+  id: "m78",
   a: "1H",
   b: "2J"
 }, {
-  id: "m85",
-  a: "1B",
+  id: "m79",
+  a: "1D",
   b: "3*"
 }, {
-  id: "m86",
+  id: "m80",
+  a: "1G",
+  b: "3*"
+}, {
+  id: "m81",
+  a: "1C",
+  b: "2F"
+}, {
+  id: "m82",
+  a: "2E",
+  b: "2I"
+}, {
+  id: "m83",
+  a: "1A",
+  b: "3*"
+}, {
+  id: "m84",
+  a: "1L",
+  b: "3*"
+}, {
+  id: "m85",
   a: "1J",
   b: "2H"
 }, {
+  id: "m86",
+  a: "2D",
+  b: "2G"
+}, {
   id: "m87",
-  a: "1K",
+  a: "2B",
   b: "3*"
 }, {
   id: "m88",
-  a: "2D",
-  b: "2G"
+  a: "2K",
+  b: "3*"
 }];
 // 16-delsfinale (Round of 16) – vinnerne fra R32 møtes parvis (FIFAs bracket-tre)
 const R16_PAIRS = [["m73", "m74"], ["m75", "m76"], ["m77", "m78"], ["m79", "m80"], ["m81", "m82"], ["m83", "m84"], ["m85", "m86"], ["m87", "m88"]];
@@ -382,10 +382,12 @@ function App() {
     const unsubTips = fns.onSnapshot(fns.collection(db, "tips"), snap => {
       const entries = [];
       snap.forEach(doc => entries.push(doc.data()));
+      console.log("Hentet " + entries.length + " tips fra Firestore");
       setAllEntries(entries);
       setLoading(false);
     }, err => {
-      console.error(err);
+      console.error("FIRESTORE LESEFEIL:", err.code, err.message);
+      alert("Klarte ikke å hente tips fra databasen.\n\nFeil: " + err.code + "\n" + err.message + "\n\n(Sjekk Firestore-reglene i Firebase-konsollen.)");
       setLoading(false);
     });
     const unsubFasit = fns.onSnapshot(fns.doc(db, "meta", "fasit"), d => {
