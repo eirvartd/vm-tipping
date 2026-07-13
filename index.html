@@ -17,23 +17,19 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- Firebase (compat-versjon: vanlige script-tagger, INGEN import) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div id="root"></div>
 
 <!-- ============================================================
-     FIREBASE-OPPSETT
-     Lim inn dine egne nøkler fra Firebase-konsollen nedenfor.
-     (Se guiden: SETUP-firebase.md)
+     FIREBASE-OPPSETT (nøkler ferdig utfylt)
      ============================================================ -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import {
-    getFirestore, collection, doc, setDoc, onSnapshot
-  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-  // 🔑 FIREBASE-KONFIG (ferdig utfylt):
-  const firebaseConfig = {
+<script>
+  var firebaseConfig = {
     apiKey: "AIzaSyDUsU8cMm8LA2mTTTvlGdoJoEeq8aoxfVI",
     authDomain: "vm-tipping-kontor.firebaseapp.com",
     projectId: "vm-tipping-kontor",
@@ -42,11 +38,21 @@
     appId: "1:186411096564:web:58c5568c077750a85ec1a1"
   };
 
-  // Koble til Firebase
   try {
-    const fbApp = initializeApp(firebaseConfig);
-    const db = getFirestore(fbApp);
-    window.__db = { db, fns: { collection, doc, setDoc, onSnapshot } };
+    firebase.initializeApp(firebaseConfig);
+    var _fs = firebase.firestore();
+    // Wrapper med samme API-form som appen forventer
+    window.__db = {
+      db: _fs,
+      fns: {
+        collection: function (db, name) { return db.collection(name); },
+        doc: function (db, col, id) { return db.collection(col).doc(id); },
+        setDoc: function (ref, data) { return ref.set(data); },
+        onSnapshot: function (ref, cb, errCb) {
+          return ref.onSnapshot(function (snap) { cb(snap); }, errCb);
+        }
+      }
+    };
   } catch (err) {
     console.error("Firebase-feil:", err);
     window.__db = null;
@@ -296,7 +302,8 @@ function App() {
       setLoading(false);
     }, (err) => { console.error(err); setLoading(false); });
     const unsubFasit = fns.onSnapshot(fns.doc(db, "meta", "fasit"), (d) => {
-      if (d.exists()) setAdmin(d.data());
+      const finnes = typeof d.exists === "function" ? d.exists() : d.exists;
+      if (finnes) setAdmin(d.data());
     });
     return () => { unsubTips(); unsubFasit(); };
   }, []);
