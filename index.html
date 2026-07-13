@@ -32,23 +32,23 @@
     getFirestore, collection, doc, setDoc, onSnapshot
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// 🔑 LIM INN DIN EGEN FIREBASE-KONFIG HER:
-const firebaseConfig = {
-  apiKey: "AIzaSyDUsU8cMm8LA2mTTTvlGdoJoEeq8aoxfVI",
-  authDomain: "vm-tipping-kontor.firebaseapp.com",
-  projectId: "vm-tipping-kontor",
-  storageBucket: "vm-tipping-kontor.firebasestorage.app",
-  messagingSenderId: "186411096564",
-  appId: "1:186411096564:web:58c5568c077750a85ec1a1"
-};
+  // 🔑 FIREBASE-KONFIG (ferdig utfylt):
+  const firebaseConfig = {
+    apiKey: "AIzaSyDUsU8cMm8LA2mTTTvlGdoJoEeq8aoxfVI",
+    authDomain: "vm-tipping-kontor.firebaseapp.com",
+    projectId: "vm-tipping-kontor",
+    storageBucket: "vm-tipping-kontor.firebasestorage.app",
+    messagingSenderId: "186411096564",
+    appId: "1:186411096564:web:58c5568c077750a85ec1a1"
+  };
 
-
-  // Bare koble til hvis konfig faktisk er fylt inn
-  if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "DIN_API_KEY") {
+  // Koble til Firebase
+  try {
     const fbApp = initializeApp(firebaseConfig);
     const db = getFirestore(fbApp);
     window.__db = { db, fns: { collection, doc, setDoc, onSnapshot } };
-  } else {
+  } catch (err) {
+    console.error("Firebase-feil:", err);
     window.__db = null;
   }
 </script>
